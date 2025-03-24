@@ -1,0 +1,43 @@
+# Virtual environment (Poetry or venv)
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Poetry lock file (optional, if you don't want to track dependencies changes)
+poetry.lock
+
+# Logs and IDE files
+*.log
+.vscode/
+.history/
+
+# Jupyter Notebook checkpoints (if using Jupyter)
+.ipynb_checkpoints/
+
+# MongoDB data (if running a local MongoDB instance)
+data/
+dump/
+
+# ChromaDB storage (if using ChromaDB for vector search)
+chroma_db/
+
+# Cached files and temp files
+.cache/
+.mypy_cache/
+.pytest_cache/
+
+# OS-specific files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Uploaded files (if users upload PDFs or other files)
+uploads/
+
+# Environment variables
+.env
