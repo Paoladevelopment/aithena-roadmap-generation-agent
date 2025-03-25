@@ -1,6 +1,6 @@
-import json
 import os
 from typing import Optional
+from uuid import uuid4
 
 import uvicorn
 from dotenv import load_dotenv
@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from tutorgpt.tutorgptapi import TutorGPTAPI
+from tutorgpt.graph import stream_graph_updates
+
 
 # Load environment variables
 load_dotenv()
@@ -48,7 +49,6 @@ async def say_hello():
 
 
 class MessageList(BaseModel):
-    session_id: str
     human_say: str
 
 
@@ -58,73 +58,23 @@ sessions = {}
 @app.get("/botname", response_model=None)
 async def get_bot_name(authorization: Optional[str] = Header(None)):
     load_dotenv()
-    if os.getenv("ENVIRONMENT") == "production":
-        get_auth_key(authorization)
-        
-    tutor_api = TutorGPTAPI(
-        config_path=os.getenv("CONFIG_PATH", "examples/example_agent_setup.json"),
-        verbose=True,
-        shared_learning_repository=os.getenv(
-            "SHARED_LEARNING_REPOSITORY", "examples/shared_resources.txt"
-        ),
-        model_name=os.getenv("GPT_MODEL", "gpt-3.5-turbo"),
+    return "bot_name"
+
+
+@app.post("/chat", response_class=StreamingResponse)
+async def chat_with_tutor_agent(
+    req: MessageList, 
+    thread_id: Optional[str] = Query(default=None), 
+    authorization: Optional[str] = Header(None)
+    ):
+
+    thread_id = thread_id or str(uuid4())
+
+    user_input = req.human_say
+    return StreamingResponse(
+        stream_graph_updates(user_input, thread_id),
+        media_type="text/event-stream"
     )
-    name = tutor_api.tutor_agent.tutor_name
-    return {"name": name, "model": tutor_api.tutor_agent.model_name}
-
-
-@app.post("/chat")
-async def chat_with_tutor_agent(req: MessageList, stream: bool = Query(False), authorization: Optional[str] = Header(None)):
-    """
-    Handles chat interactions with the tutor agent.
-
-    This endpoint receives a message from the user and returns the tutor agent's response. It supports session management to maintain context across multiple interactions with the same user.
-
-    Args:
-        req (MessageList): A request object containing the session ID and the message from the human user.
-        stream (bool, optional): A flag to indicate if the response should be streamed. Currently, streaming is not implemented.
-
-    Returns:
-        If streaming is requested, it returns a StreamingResponse object (not yet implemented). Otherwise, it returns the tutor agent's response to the user's message.
-
-    Note:
-        Streaming functionality is planned but not yet available. The current implementation only supports synchronous responses.
-    """
-    tutor_api = None
-    if os.getenv("ENVIRONMENT") == "production":
-        get_auth_key(authorization)
-
-    if req.session_id in sessions:
-        print("Session is found!")
-        tutor_api = sessions[req.session_id]
-        print(f"Are tools activated: {tutor_api.tutor_agent.use_tools}")
-        print(f"Session id: {req.session_id}")
-    else:
-        print("Creating new session")
-        tutor_api = TutorGPTAPI(
-            config_path=os.getenv("CONFIG_PATH", "examples/example_agent_setup.json"),
-            verbose=True,
-            product_catalog=os.getenv(
-                "PRODUCT_CATALOG", "examples/sample_product_catalog.txt"
-            ),
-            model_name=os.getenv("GPT_MODEL", "gpt-3.5-turbo"),
-            use_tools=os.getenv("USE_TOOLS_IN_API", "True").lower()
-            in ["true", "1", "t"],
-        )
-        print(f"TOOLS?: {tutor_api.tutor_agent.use_tools}")
-        sessions[req.session_id] = tutor_api
-
-    if stream:
-        async def stream_response():
-            stream_gen = tutor_api.do_stream(req.conversation_history, req.human_say)
-            async for message in stream_gen:
-                data = {"token": message}
-                yield json.dumps(data).encode("utf-8") + b"\n"
-
-        return StreamingResponse(stream_response())
-    else:
-        response = await tutor_api.do(req.human_say)
-        return response
 
 
 # Main entry point

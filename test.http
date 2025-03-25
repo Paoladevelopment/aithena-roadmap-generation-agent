@@ -1,0 +1,9 @@
+http://127.0.0.1:8000/
+
+### Chat with Tutor Agent
+POST http://127.0.0.1:8000/chat?thread_id=f6671828-ac4d-415d-8bfa-0c2376b245b7
+Content-Type: application/json
+
+{
+  "human_say": "Remember my name?"
+}
