@@ -1,43 +1,53 @@
-import json
-from langchain_core.messages import ToolMessage
+import psycopg2
 
-class BasicToolNode:
-    """A node that runs the tools requested in the last AI message."""
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool
 
-    def __init__(self, tools: list) -> None:
-        self.tools_by_name = {tool.name: tool for tool in tools}
-        print("[ToolNode] Tools registered:", list(self.tools_by_name.keys()))
+from tutorgpt.utils.config import settings
 
-    def __call__(self, inputs: dict):
-        print("[ToolNode] Inputs received:", inputs)
+@tool
+def fetch_user_information(config: RunnableConfig) -> list[dict]:
+    """Fetches user information from the database given a user_id."""
+    configuration = config.get("configurable", {})
+    user_id = configuration.get("user_id", None)
+    
+    if not user_id:
+        raise ValueError("No user ID configured.")
+    
+    conn = None
+    cursor = None
 
-        if messages := inputs.get("messages", []):
-            message = messages[-1]
-            print("[ToolNode] Last message:", message)
-        else:
-            raise ValueError("No message found in input")
+    try:
+        conn = psycopg2.connect(settings.DATABASE_URI)
+        cursor = conn.cursor()
 
-        outputs = []
-        for tool_call in getattr(message, "tool_calls", []):
-            tool_name = tool_call["name"]
-            print(f"[ToolNode] Invoking tool: {tool_name} with args: {tool_call['args']}")
+        query = '''
+            SELECT name, username, email
+            FROM users 
+            WHERE user_id = %s
+        '''
 
-            try:
-                tool_result = self.tools_by_name[tool_name].invoke(tool_call["args"])
-                # Aseguramos que es serializable
-                tool_content = json.dumps(tool_result)
-            except Exception as e:
-                print(f"[ToolNode] Error in tool '{tool_name}': {e}")
-                tool_content = json.dumps({"error": str(e)})
+        cursor.execute(query, (user_id,))
 
-            outputs.append(
-                ToolMessage(
-                    content=tool_content,
-                    name=tool_name,
-                    tool_call_id=tool_call["id"],
-                )
-            )
+        rows = cursor.fetchall()
+        column_names = [column[0] for column in cursor.description]
+        results = [dict(zip(column_names, row)) for row in rows]
 
-        print("[ToolNode] Tool outputs:", outputs)
-        return {"messages": outputs}
+        cursor.close()
+        conn.close()
+
+        return results
+    
+    except psycopg2.Error as e:
+        print(f"[DB ERROR] Failed to fetch user info: {e}")
+        return []
+    
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except Exception as close_err:
+            print(f"[DB WARNING] Error closing DB resources: {close_err}")
 

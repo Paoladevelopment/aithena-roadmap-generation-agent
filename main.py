@@ -15,8 +15,6 @@ from tutorgpt.graph import stream_graph_updates
 # Load environment variables
 load_dotenv()
 
-# Access environment variables
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 CORS_ORIGINS = ["http://localhost:3000"]
 CORS_METHODS = ["GET", "POST"]
 
@@ -32,17 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class AuthenticatedResponse(BaseModel):
-    message: str
-
-def get_auth_key(authorization: str = Header(...)) -> None:
-    auth_key = os.getenv("AUTH_KEY")
-    if not auth_key:
-        raise HTTPException(status_code=500, detail="AUTH_KEY not configured")
-    expected_header = f"Bearer {auth_key}"
-    if authorization != expected_header:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
 @app.get("/")
 async def say_hello():
     return {"message": "Hello World"}
@@ -55,16 +42,11 @@ class MessageList(BaseModel):
 sessions = {}
 
 
-@app.get("/botname", response_model=None)
-async def get_bot_name(authorization: Optional[str] = Header(None)):
-    load_dotenv()
-    return "bot_name"
-
-
 @app.post("/chat", response_class=StreamingResponse)
 async def chat_with_tutor_agent(
     req: MessageList, 
     thread_id: Optional[str] = Query(default=None), 
+    user_id: Optional[str] = Query(default=None),
     authorization: Optional[str] = Header(None)
     ):
 
@@ -72,7 +54,7 @@ async def chat_with_tutor_agent(
 
     user_input = req.human_say
     return StreamingResponse(
-        stream_graph_updates(user_input, thread_id),
+        stream_graph_updates(user_input, thread_id, user_id),
         media_type="text/event-stream"
     )
 

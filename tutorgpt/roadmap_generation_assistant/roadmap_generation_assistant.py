@@ -1,0 +1,36 @@
+from pydantic import BaseModel, Field
+
+from tutorgpt.core.llm_config import get_llm
+from tutorgpt.core.assistant import CompleteOrEscalate
+from tutorgpt.roadmap_generation_assistant.tools import (
+    summarize_collected_information,
+    generate_roadmap,
+    add_resources_to_roadmap,
+    save_roadmap_to_database
+)
+from tutorgpt.roadmap_generation_assistant.prompts import roadmap_generation_prompt
+from tutorgpt.tools.search_tools import resource_ranker
+
+llm = get_llm()
+
+roadmap_generation_tools = [
+    summarize_collected_information,
+    generate_roadmap,
+    add_resources_to_roadmap,
+    save_roadmap_to_database,
+    resource_ranker
+]
+
+roadmap_generation_runnable = roadmap_generation_prompt | llm.bind_tools(
+    roadmap_generation_tools + [CompleteOrEscalate]
+)
+
+class ToRoadmapGenerationAssistant(BaseModel):
+    """Transfers control to the roadmap generation assistant to create a personalized learning roadmap."""
+
+    request: str = Field(
+        description=(
+            "Reason why the roadmap generation assistant is being invoked, typically when the user is ready to receive "
+            "their personalized learning roadmap after all information gathering stages are complete."
+        )
+    ) 

@@ -41,3 +41,6 @@ uploads/
 
 # Environment variables
 .env
+
+#Langgraph api
+.Langgraph_api

@@ -1,0 +1,7 @@
+{
+  "dependencies": ["./tutorgpt"],
+  "graphs": {
+    "agent": "./tutorgpt/graph.py:graph"
+  },
+  "env": ".env"
+}
