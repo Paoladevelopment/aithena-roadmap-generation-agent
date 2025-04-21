@@ -5,8 +5,7 @@ from tutorgpt.core.assistant import CompleteOrEscalate
 from tutorgpt.roadmap_generation_assistant.tools import (
     summarize_collected_information,
     generate_roadmap,
-    add_resources_to_roadmap,
-    save_roadmap_to_database
+    add_resources_and_save_roadmap
 )
 from tutorgpt.roadmap_generation_assistant.prompts import roadmap_generation_prompt
 from tutorgpt.tools.search_tools import resource_ranker
@@ -16,9 +15,7 @@ llm = get_llm()
 roadmap_generation_tools = [
     summarize_collected_information,
     generate_roadmap,
-    add_resources_to_roadmap,
-    save_roadmap_to_database,
-    resource_ranker
+    add_resources_and_save_roadmap
 ]
 
 roadmap_generation_runnable = roadmap_generation_prompt | llm.bind_tools(

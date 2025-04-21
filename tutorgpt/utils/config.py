@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     DB_PORT: str | None = os.getenv('DB_PORT')
     DB_USER: str | None = os.getenv('DB_USER')
     DB_PASS: str | None = os.getenv('DB_PASSWORD')
+    MONGODB_URI: str | None = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
 
     SQLITE_PATH: str = sqlite_db_path
 

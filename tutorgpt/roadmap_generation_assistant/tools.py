@@ -3,15 +3,18 @@ from langchain_core.tools import tool
 from datetime import datetime
 import uuid
 from pymongo import MongoClient
+from pymongo.server_api import ServerApi
 import os
-import json
 
 from tutorgpt.core.llm_config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from tutorgpt.tools.search_tools import resource_ranker, RankerInput
 from tutorgpt.core.state import State
+from tutorgpt.utils.config import settings
 
-client = MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017/"))
+MONGODB_URI = settings.MONGODB_URI
+
+client = MongoClient(MONGODB_URI, server_api=ServerApi('1'))
 db = client["learning_roadmap"]
 roadmaps_collection = db["roadmaps"]
 
@@ -30,7 +33,7 @@ def summarize_collected_information(state: State) -> str:
     Returns:
         A formatted string summarizing the collected information
     """
-    # Create a prompt for the LLM to extract and summarize the collected information
+
     summary_prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an expert at summarizing information from conversations.
         
@@ -49,17 +52,70 @@ def summarize_collected_information(state: State) -> str:
         ("user", "Please summarize the information collected from this conversation:\n\n{messages}")
     ])
     
-    # Extract messages from the state
     messages = state.get("messages", [])
     messages_text = "\n".join([f"{msg.type}: {msg.content}" for msg in messages])
     
-    # Generate the summary using the LLM
     summary_response = llm.invoke(summary_prompt.format(messages=messages_text))
 
     summary = summary_response.content
     state["chat_summary"] = summary
 
     return summary
+
+def extract_title_and_description(lines: List[str], roadmap: Dict[str, Any]) -> int:
+    """
+    Modifies the roadmap dict in-place to fill in title and description.
+    Returns the line index where objectives start.
+    """
+    for i, line in enumerate(lines):
+        line = line.strip()
+
+        if line.startswith("Roadmap Title:"):
+            roadmap["title"] = line.replace("Roadmap Title:", "").strip()
+        elif line.startswith("Description:"):
+            roadmap["description"] = line.replace("Description:", "").strip()
+        elif line.startswith("Objective"):
+            return i
+    return len(lines)
+
+def extract_objectives_and_tasks(lines: List[str]) -> List[Dict[str, Any]]:
+    """
+    Parses objectives and their tasks from the lines.
+    """
+    objectives = []
+    current_objective = None
+    objective_index = 1
+
+    for line in lines:
+        line = line.strip()
+
+        if not line:
+            continue
+
+        if line.startswith("Objective") and ":" in line:
+            title = line.split(":", 1)[1].strip()
+
+            current_objective = {
+                "title": title,
+                "order_index": objective_index,
+                "tasks": []
+            }
+
+            objectives.append(current_objective)
+            objective_index += 1
+
+        elif line.startswith("-") and ":" in line and current_objective is not None:
+            task_title = line.split(":", 1)[1].strip()
+
+            task = {
+                "title": task_title,
+                "order_index": len(current_objective["tasks"]) + 1,
+                "resources": []
+            }
+
+            current_objective["tasks"].append(task)
+
+    return objectives
 
 @tool
 def generate_roadmap(subject: str, state: State) -> Dict[str, Any]:
@@ -74,95 +130,129 @@ def generate_roadmap(subject: str, state: State) -> Dict[str, Any]:
         A dictionary containing the generated roadmap
     """
 
-    roadmap_id = f"roadmap_{uuid.uuid4().hex[:8]}"
-    user_email = state["user_info"]["email"]
+    roadmap_id = uuid.uuid4().hex[:8]
     created_at = datetime.now()
+
+    user_email = state.get("user_info", {}).get("email", "unknown_user")
+    summary = state.get("chat_summary", "")
     
-    summary = state["chat_summary"]
+    default_roadmap = {
+        "roadmap_id": roadmap_id,
+        "title": f"{subject} learning path",
+        "description": f"A personalized learning path for {subject} based on your preferences and goals.",
+        "objectives": []
+    }
     
     roadmap_prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are an expert curriculum designer. Your task is to generate a personalized learning roadmap for a user.
-        
-        Based on the user's subject of interest, prior knowledge, learning preferences, time availability, and resource preferences,
-        create a structured learning roadmap with objectives and tasks.
-        
-        The roadmap should follow this exact JSON structure:
-        {
-          "roadmap_id": "roadmap_001",
-          "title": "Subject Learning Path",
-          "description": "A personalized learning path for the subject.",
-          "objectives": [
-            {
-              "title": "Objective Title",
-              "order_index": 1,
-              "tasks": [
-                {
-                  "title": "Task Title",
-                  "order_index": 1,
-                  "resources": []
-                }
-              ]
-            }
-          ]
-        }
-        
-        Guidelines:
-        1. Include a set of clear, well-structured objectives that follow a logical learning progression.
-        2. Each objective should contain a reasonable number of tasks that break down the learning into actionable steps.
-        3. Ensure the order_index values are sequential (1, 2, 3, etc.)
-        4. Leave the resources array empty (resources will be added later).
-        5. Tailor the difficulty and pace based on the user's prior knowledge and time availability.
-        6. Consider the user's learning style when structuring the objectives and tasks.
-        
-        Return ONLY the JSON structure without any additional text or explanation.
+        ("system", """You are an expert curriculum designer. Your task is to outline a personalized learning roadmap based on the user's needs.
+
+        Respond using only the following structured format:
+
+        Roadmap Title: <title>
+        Description: <description>
+
+        Objective 1: <Objective title>
+        - Task 1.1: <Task title>
+        - Task 1.2: <Task title>
+        - Task 1.3: <Task title>
+        - (Add more if needed)
+
+        Objective 2: <Objective title>
+        - Task 2.1: <Task title>
+        - Task 2.2: <Task title>
+        - Task 2.3: <Task title>
+        - (Add more if needed)
+
+        ...
+
+        Include as many objectives as necessary to create a complete learning path.
+
+        **Each objective must include at least 3 tasks**, but can contain more if appropriate.
+
+        Return only the structured roadmap. Do **not** include any explanation, markdown formatting, introductions, or conclusions.
         """),
-        ("user", f"""
-        Subject: {subject}
-        
-        Summary of Collected Information:
+        ("user", f"""Subject: {subject}
+
+        Summary of collected Information:
         {summary}
-        
-        Generate a learning roadmap for this user.
-        """)
+
+        Please outline a roadmap following the format above.""")
     ])
     
-    roadmap_response = llm.invoke(roadmap_prompt)
-    roadmap_content = roadmap_response.content
-    
     try:
-        json_start = roadmap_content.find('{')
-        json_end = roadmap_content.rfind('}') + 1
-        if json_start >= 0 and json_end > json_start:
-            roadmap_json = roadmap_content[json_start:json_end]
-            roadmap = json.loads(roadmap_json)
-        else:
-            roadmap = {
-                "roadmap_id": roadmap_id,
-                "title": f"{subject} Learning Path",
-                "description": f"A personalized learning path for {subject} based on your preferences and goals.",
-                "objectives": []
-            }
+        formatted_prompt = roadmap_prompt.format()
+        roadmap_response = llm.invoke(formatted_prompt)
+        roadmap_content = roadmap_response.content
+        
+        print(f"LLM Response: {roadmap_content}")
+        
+        roadmap = parse_structured_text_to_json(roadmap_content, default_roadmap)
+        
     except Exception as e:
-        roadmap = {
-            "roadmap_id": roadmap_id,
-            "title": f"{subject} Learning Path",
-            "description": f"A personalized learning path for {subject} based on your preferences and goals.",
-            "objectives": []
-        }
-    
-    if "roadmap_id" not in roadmap:
-        roadmap["roadmap_id"] = roadmap_id
-    if "title" not in roadmap:
-        roadmap["title"] = f"{subject} Learning Path"
-    if "description" not in roadmap:
-        roadmap["description"] = f"A personalized learning path for {subject} based on your preferences and goals."
-    if "objectives" not in roadmap:
-        roadmap["objectives"] = []
+        print(f"Error in generate_roadmap: {e}")
+        roadmap = default_roadmap
     
     roadmap["user_id"] = user_email
     roadmap["created_at"] = created_at
     
     return roadmap
+
+def parse_structured_text_to_json(text: str, default_roadmap: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Parse the structured text format into a JSON format.
+    
+    Args:
+        text: The structured text from the LLM
+        default_roadmap: The default roadmap to use if parsing fails
+        
+    Returns:
+        A dictionary containing the parsed roadmap
+    """
+    try:
+        roadmap = {
+            "roadmap_id": default_roadmap["roadmap_id"],
+            "title": default_roadmap["title"],
+            "description": default_roadmap["description"],
+            "objectives": []
+        }
+
+        lines = text.strip().split('\n')
+
+        start_index = extract_title_and_description(lines, roadmap)
+
+        roadmap["objectives"] = extract_objectives_and_tasks(lines[start_index:])
+
+        return roadmap
+        
+    except Exception as e:
+        print(f"Error parsing structured text: {e}")
+        return default_roadmap
+
+
+@tool
+def add_resources_and_save_roadmap(roadmap: dict, subject: str, state: State) -> str:
+    """
+    Add resources to the roadmap and then save it to the database.
+    
+    Args:
+        roadmap: The roadmap dictionary
+        subject: The main subject or learning goal
+        state: The complete state object containing the conversation history
+        
+    Returns:
+        A confirmation message with the roadmap ID
+    """
+    try:
+        if not isinstance(roadmap, dict) or not roadmap:
+            return "Error: Invalid or empty roadmap. Cannot add resources or save to database."
+        
+        updated_roadmap = add_resources_to_roadmap(roadmap, subject, state)
+        
+        return save_roadmap_to_database(updated_roadmap)
+    except Exception as e:
+        print(f"Error in add_resources_and_save_roadmap: {e}")
+        return f"Error processing roadmap: {str(e)}"
+
 
 def parse_ranked_resources(resources: List[str]) -> List[Dict[str, str]]:
     parsed_resources = []
@@ -188,7 +278,7 @@ def parse_ranked_resources(resources: List[str]) -> List[Dict[str, str]]:
 
     return parsed_resources
 
-@tool
+
 def add_resources_to_roadmap(roadmap: Dict[str, Any], subject: str, state: State) -> Dict[str, Any]:
     """
     Add relevant resources to the roadmap based on the user's preferences using the resource_ranker tool.
@@ -201,23 +291,39 @@ def add_resources_to_roadmap(roadmap: Dict[str, Any], subject: str, state: State
     Returns:
         The updated roadmap with resources added
     """
-    summary = state["chat_summary"]
+    if "objectives" not in roadmap:
+        print("Error: roadmap does not have objectives")
+        roadmap["objectives"] = []
     
-    resource_preference = "resources"
+    summary = state.get("chat_summary", "")
+    
+    resource_preference = "web"
     
     if "Resource Preferences" in summary:
-        resource_section = summary.split("Resource Preferences")[1].split("\n\n")[0]
-        if "videos" in resource_section.lower():
-            resource_preference = "videos"
-        elif "articles" in resource_section.lower():
-            resource_preference = "articles"
-        elif "books" in resource_section.lower():
-            resource_preference = "books"
-        elif "interactive" in resource_section.lower() or "tutorials" in resource_section.lower():
-            resource_preference = "interactive"
+        try:
+            resource_section = summary.split("Resource Preferences")[1].split("\n\n")[0]
+            if "videos" in resource_section.lower():
+                resource_preference = "videos"
+            elif "articles" in resource_section.lower():
+                resource_preference = "articles"
+            elif "books" in resource_section.lower():
+                resource_preference = "books"
+            elif "interactive" in resource_section.lower() or "tutorials" in resource_section.lower():
+                resource_preference = "interactive"
+        except Exception as e:
+            print(f"Error parsing resource preferences: {e}")
     
     for objective in roadmap["objectives"]:
+        if not isinstance(objective, dict):
+            continue
+            
+        if "tasks" not in objective:
+            objective["tasks"] = []
+            
         for task in objective["tasks"]:
+            if not isinstance(task, dict) or "title" not in task:
+                continue
+                
             task_title = task["title"]
             
             search_query = f"{subject} {task_title}"
@@ -228,14 +334,14 @@ def add_resources_to_roadmap(roadmap: Dict[str, Any], subject: str, state: State
                     resource_preference=resource_preference
                 )
                 
-                resources = resource_ranker(ranker_input)
+                resources = resource_ranker.invoke({"input_data": ranker_input.dict()})
                 task["resources"] = parse_ranked_resources(resources)
             except Exception as e:
+                print(f"Error adding resources to task: {e}")
                 task["resources"] = []
     
     return roadmap
 
-@tool
 def save_roadmap_to_database(roadmap: Dict[str, Any]) -> str:
     """
     Save the generated roadmap to the MongoDB database.
