@@ -213,36 +213,31 @@ builder.add_conditional_edges("fetch_user_info", route_to_workflow)
 memory = MemorySaver()
 graph = builder.compile(checkpointer=memory)
 
-def stream_graph_updates(user_input: str, thread_id: str, user_id: str):
-    yield f"data: {{\"thread_id\": \"{thread_id}\"}}\n\n"
-
+def generate_chat_response(user_input: str, thread_id: str, user_id: str):
     config = {
-        "configurable": 
-            {
-                "thread_id": thread_id,
-                "user_id": user_id,
-            }
+        "configurable": {
+            "thread_id": thread_id,
+            "user_id": user_id,
         }
+    }
 
-    _printed = set()
-    for event in graph.stream(
+    result = graph.invoke(
         {
-            "messages": 
-                [
-                    {
-                        "role": "user", 
-                        "content": user_input
-                    }
-                ]
-            },
-        config=config,
-        stream_mode="values"
-    ):
-        _print_event(event, _printed)
-        for value in event.values():
-            if isinstance(value, list) and value:
-                last_item = value[-1]
+            "messages": [
+                {
+                    "role": "user", 
+                    "content": user_input
+                }
+            ]
+        },
+        config=config
+    )
 
-                if hasattr(last_item, "content"):
-                    content = last_item.content
-                    yield f"data: {json.dumps({'content': content})}\n\n"
+    final_answer = None
+    for value in result.values():
+        if isinstance(value, list) and value:
+            last_item = value[-1]
+            if hasattr(last_item, "content"):
+                final_answer = last_item.content
+
+    return {"thread_id": thread_id, "content": final_answer}

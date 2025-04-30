@@ -1,19 +1,19 @@
 from langchain_core.tools import tool
 from langchain_tavily import TavilySearch
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 from typing import List
+from tutorgpt.models.tavily import SearchInput, SearchOutput, Resource, RankerInput
 
-class SearchInput(BaseModel):
-    query: str
-    search_depth: str
-
-class SearchOutput(BaseModel):
-    summary_answer: str
-    resources: List[str]
-
-class RankerInput(BaseModel):
-    learning_topic: str
-    resource_preference: str
+def build_resources(raw_results: List[dict]) -> List[Resource]:
+    resources = []
+    for r in raw_results:
+        if "title" in r and "url" in r:
+            try:
+                resource = Resource(title=r["title"], url=r["url"])
+                resources.append(resource)
+            except Exception:
+                continue
+    return resources
 
 def search_learning_resources(input_data: SearchInput) -> SearchOutput:
     """
@@ -35,8 +35,7 @@ def search_learning_resources(input_data: SearchInput) -> SearchOutput:
     summary_answer = result.get("answer", "")
     raw_results = result.get("results", [])
 
-    # Show title + direct URL
-    resources = [f"{r['title']} - {r['url']}" for r in raw_results]
+    resources = resources = build_resources(raw_results)
 
     return SearchOutput(summary_answer=summary_answer, resources=resources)
 
@@ -45,11 +44,13 @@ def resource_ranker(input_data: RankerInput) -> SearchOutput:
     """
     Returns top 5 learning resources based on the user's topic and resource preferences.
     """
-    query = f"top {input_data.resource_preference} for learning {input_data.learning_topic}"
+    query = f"top {input_data.resource_preference} resources to learn about {input_data.learning_topic}"
+
+    print(f"[resource_ranker] Tavily Search query: '{query}'")
 
     results = search_learning_resources(SearchInput(
         query=query,
         search_depth="basic"
     ))
 
-    return results.resources[:5]
+    return results.resources[:3]

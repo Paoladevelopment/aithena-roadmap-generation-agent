@@ -1,21 +1,21 @@
-import os
 from typing import Optional
 from uuid import uuid4
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, Header, HTTPException, Depends
+from fastapi import FastAPI, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from tutorgpt.graph import stream_graph_updates
+from tutorgpt.graph import generate_chat_response
+from auth import TokenData, decode_jwt_token
 
 
 # Load environment variables
 load_dotenv()
 
-CORS_ORIGINS = ["http://localhost:3000"]
+CORS_ORIGINS = ["*"]
 CORS_METHODS = ["GET", "POST"]
 
 # Initialize FastAPI app
@@ -42,23 +42,20 @@ class MessageList(BaseModel):
 sessions = {}
 
 
-@app.post("/chat", response_class=StreamingResponse)
+@app.post("/chat", response_class=JSONResponse)
 async def chat_with_tutor_agent(
     req: MessageList, 
     thread_id: Optional[str] = Query(default=None), 
-    user_id: Optional[str] = Query(default=None),
-    authorization: Optional[str] = Header(None)
-    ):
+    token_data: TokenData = Depends(decode_jwt_token)
+):
 
     thread_id = thread_id or str(uuid4())
+    user_id = str(token_data.user_id)
 
     user_input = req.human_say
-    return StreamingResponse(
-        stream_graph_updates(user_input, thread_id, user_id),
-        media_type="text/event-stream"
-    )
-
+    response_data = generate_chat_response(user_input, thread_id, user_id)
+    return JSONResponse(content=response_data)
 
 # Main entry point
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8001)
