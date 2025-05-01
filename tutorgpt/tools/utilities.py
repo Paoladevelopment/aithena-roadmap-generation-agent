@@ -22,7 +22,7 @@ def fetch_user_information(config: RunnableConfig) -> list[dict]:
         cursor = conn.cursor()
 
         query = '''
-            SELECT name, username, email
+            SELECT name, username, email, user_id
             FROM users 
             WHERE user_id = %s
         '''
