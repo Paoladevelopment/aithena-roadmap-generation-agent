@@ -5,7 +5,7 @@ import uuid
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 
-from tutorgpt.core.llm_config import get_llm
+from tutorgpt.core.llm_config import get_llm, safe_llm_invoke
 from langchain_core.prompts import ChatPromptTemplate
 from tutorgpt.tools.search_tools import resource_ranker
 from tutorgpt.models.tavily import Resource, SearchOutput, RankerInput
@@ -56,7 +56,7 @@ def summarize_collected_information(state: State) -> str:
     messages = state.get("messages", [])
     messages_text = "\n".join([f"{msg.type}: {msg.content}" for msg in messages])
     
-    summary_response = llm.invoke(summary_prompt.format(messages=messages_text))
+    summary_response = safe_llm_invoke(llm, summary_prompt.format(messages=messages_text))
 
     summary = summary_response.content
     state["chat_summary"] = summary
@@ -187,7 +187,7 @@ def generate_roadmap(subject: str, state: State) -> Dict[str, Any]:
     
     try:
         formatted_prompt = roadmap_prompt.format()
-        roadmap_response = llm.invoke(formatted_prompt)
+        roadmap_response = safe_llm_invoke(llm, formatted_prompt)
         roadmap_content = roadmap_response.content
         
         print(f"LLM Response: {roadmap_content}")
@@ -329,9 +329,8 @@ def add_resources_to_roadmap(roadmap: Dict[str, Any], subject: str, state: State
                 )
                 
                 search_output: SearchOutput = resource_ranker.invoke({"input_data": ranker_input.model_dump()})
-                resources = parse_ranked_resources(search_output.resources)
-
-                task["resources"] = parse_ranked_resources(resources)
+                
+                task["resources"] = parse_ranked_resources(search_output.resources)
             except Exception as e:
                 print(f"Error adding resources to task: {e}")
                 task["resources"] = []

@@ -53,4 +53,7 @@ def resource_ranker(input_data: RankerInput) -> SearchOutput:
         search_depth="basic"
     ))
 
-    return results.resources[:3]
+    return SearchOutput(
+        summary_answer=results.summary_answer,
+        resources=results.resources[:3]
+    )

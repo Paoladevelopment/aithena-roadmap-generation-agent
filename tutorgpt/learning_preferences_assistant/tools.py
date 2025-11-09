@@ -1,6 +1,6 @@
 from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
-from tutorgpt.core.llm_config import get_llm
+from tutorgpt.core.llm_config import get_llm, safe_llm_invoke
 
 tools_llm = get_llm(model="gpt-3.5-turbo")
 
@@ -28,7 +28,7 @@ def identify_learning_style(user_responses: str) -> dict:
     ])
 
     messages = prompt.invoke({"user_responses": user_responses})
-    response = tools_llm.invoke(messages)
+    response = safe_llm_invoke(tools_llm, messages)
     
     # Parse the response into a dictionary
     # Note: In a production environment, you'd want to add proper JSON parsing and error handling

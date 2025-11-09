@@ -1,6 +1,6 @@
 from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
-from tutorgpt.core.llm_config import get_llm
+from tutorgpt.core.llm_config import get_llm, safe_llm_invoke
 
 tools_llm = get_llm(model="gpt-3.5-turbo")
 
@@ -13,7 +13,7 @@ def suggest_topics(description: str) -> list[str]:
     ])
 
     messages = prompt.invoke({"description": description})
-    response = tools_llm.invoke(messages)
+    response = safe_llm_invoke(tools_llm, messages)
 
     return [s.strip("-• ") for s in response.content.strip().split("\n") if s.strip()]
 
@@ -27,6 +27,6 @@ def map_interest_to_goals(interest: str) -> list[str]:
     ])
 
     messages = prompt.invoke({"interest": interest})
-    response = tools_llm.invoke(messages)
+    response = safe_llm_invoke(tools_llm, messages)
 
     return [s.strip("-• ") for s in response.content.strip().split("\n") if s.strip()]

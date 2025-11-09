@@ -1,6 +1,6 @@
 from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
-from tutorgpt.core.llm_config import get_llm
+from tutorgpt.core.llm_config import get_llm, safe_llm_invoke
 
 tools_llm = get_llm(model="gpt-3.5-turbo")
 
@@ -27,7 +27,7 @@ def assess_prior_knowledge(topic: str, user_description: str) -> dict:
     ])
 
     messages = prompt.invoke({"topic": topic, "user_description": user_description})
-    response = tools_llm.invoke(messages)
+    response = safe_llm_invoke(tools_llm, messages)
     
     # Parse the response into a dictionary
     return eval(response.content)
