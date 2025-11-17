@@ -1,17 +1,19 @@
 from typing import Dict, Any, List
-from langchain_core.tools import tool
 from datetime import datetime, timezone
+import threading
 import uuid
+
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.tools import tool
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 
 from tutorgpt.core.llm_config import get_llm, safe_llm_invoke
-from langchain_core.prompts import ChatPromptTemplate
-from tutorgpt.tools.search_tools import resource_ranker
 from tutorgpt.models.tavily import Resource, SearchOutput, RankerInput
-
+from tutorgpt.tools.search_tools import resource_ranker
 from tutorgpt.core.state import State, get_last_state
 from tutorgpt.utils.config import settings
+from tutorgpt.notifications import notifier
 
 MONGODB_URI = settings.MONGODB_URI
 
@@ -256,21 +258,20 @@ def create_complete_roadmap(subject: str) -> str:
         subject: The main subject or learning goal
 
     Returns:
-        A confirmation message with the roadmap ID
+        A short confirmation message indicating that roadmap generation
+        has been started in the background.
     """
-    try:
-        real_state = get_last_state()
+    state_snapshot: Dict[str, Any] = get_last_state() or {}
 
+    def _background_job() -> None:
         roadmap = generate_roadmap.invoke({"subject": subject})
-        
-        updated_roadmap = add_resources_to_roadmap(roadmap, subject, real_state or {})
-        
-        result = save_roadmap_to_database(updated_roadmap)
+        updated_roadmap = add_resources_to_roadmap(roadmap, subject, state_snapshot)
+        save_roadmap_to_database(updated_roadmap)
 
-        return result
-        
-    except Exception as e:
-        return f"Error creating roadmap: {str(e)}"
+    thread = threading.Thread(target=_background_job, daemon=True)
+    thread.start()
+
+    return "Background roadmap generation started."
 
 
 def parse_ranked_resources(resources: List[Resource]) -> List[Dict[str, str]]:
@@ -360,5 +361,9 @@ def save_roadmap_to_database(roadmap: Dict[str, Any]) -> str:
     """
 
     result = roadmaps_collection.insert_one(roadmap)
+
+    user_id = roadmap.get("user_id")
+    if user_id:
+        notifier.notify_roadmap_ready(user_id, str(result.inserted_id))
     
     return f"Roadmap saved successfully with ID: {str(result.inserted_id)}" 
