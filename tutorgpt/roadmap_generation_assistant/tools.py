@@ -187,6 +187,7 @@ def generate_roadmap(subject: str) -> Dict[str, Any]:
         - Consider the user’s availability when designing the scope. If the user has high availability, include more objectives and tasks to leverage their time.
         - Tailor the learning to the user’s style and interactivity preference (e.g., reading, structured learning, moderate interactivity).
         - Do not include explanations, introductions, markdown, or formatting beyond the structure.
+        - VERY IMPORTANT: All roadmap content (titles, descriptions, objective names, and task titles) MUST be written in natural, clear Spanish.
 
         Return only the roadmap as plain text.
         """),
@@ -332,13 +333,14 @@ def add_resources_to_roadmap(roadmap: Dict[str, Any], subject: str, state: State
                 continue
                 
             task_title = task["title"]
-            
-            search_query = f"{subject}, with focus on: {task_title}"
+
+            # Build a simple, Spanish-friendly query for Tavily.
+            search_query = f"{task_title} sobre {subject}, recursos {resource_preference}"
             
             try:
                 ranker_input = RankerInput(
                     learning_topic=search_query,
-                    resource_preference=resource_preference
+                    resource_preference=resource_preference,
                 )
                 
                 search_output: SearchOutput = resource_ranker.invoke({"input_data": ranker_input.model_dump()})
