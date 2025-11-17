@@ -6,7 +6,7 @@ from langchain_core.tools import tool
 from tutorgpt.utils.config import settings
 
 @tool
-def fetch_user_information(config: RunnableConfig) -> list[dict]:
+def fetch_user_information(config: RunnableConfig) -> dict:
     """Fetches user information from the database given a user_id."""
     configuration = config.get("configurable", {})
     user_id = configuration.get("user_id", None)
@@ -29,18 +29,34 @@ def fetch_user_information(config: RunnableConfig) -> list[dict]:
 
         cursor.execute(query, (user_id,))
 
-        rows = cursor.fetchall()
-        column_names = [column[0] for column in cursor.description]
-        results = [dict(zip(column_names, row)) for row in rows]
+        row = cursor.fetchone()
+        
+        if row:
+            column_names = [column[0] for column in cursor.description]
+            user_data = dict(zip(column_names, row))
 
-        cursor.close()
-        conn.close()
+            cursor.close()
+            conn.close()
+            
+            return user_data
+        else:
+            cursor.close()
+            conn.close()
 
-        return results
+            return {
+                "name": "Unknown User",
+                "username": "unknown_user",
+                "email": "unknown@example.com",
+                "user_id": "unknown_user_id"
+            }
     
     except psycopg2.Error as e:
-        print(f"[DB ERROR] Failed to fetch user info: {e}")
-        return []
+        return {
+            "name": "Unknown User",
+            "username": "unknown_user",
+            "email": "unknown@example.com",
+            "user_id": "unknown_user_id"
+        }
     
     finally:
         try:
@@ -48,6 +64,6 @@ def fetch_user_information(config: RunnableConfig) -> list[dict]:
                 cursor.close()
             if conn:
                 conn.close()
-        except Exception as close_err:
-            print(f"[DB WARNING] Error closing DB resources: {close_err}")
+        except Exception:
+            pass
 

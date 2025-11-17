@@ -1,6 +1,7 @@
 import json
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph, START
+from langchain_core.runnables import RunnableConfig
 
 from tutorgpt.core.state import State
 from tutorgpt.core.assistant import Assistant
@@ -36,10 +37,11 @@ from tutorgpt.route_workflow import route_to_workflow
 
 builder = StateGraph(State)
 
-def user_info(state: State):
+def user_info(state: State, config: RunnableConfig):
     if state.get("user_info"):
         return {}
-    return {"user_info": fetch_user_information.invoke({})}
+    fetched = fetch_user_information.invoke(config)
+    return {"user_info": fetched}
 
 #Starting point
 builder.add_node("fetch_user_info", user_info)

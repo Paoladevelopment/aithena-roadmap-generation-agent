@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from tutorgpt.tools.search_tools import resource_ranker
 from tutorgpt.models.tavily import Resource, SearchOutput, RankerInput
 
-from tutorgpt.core.state import State
+from tutorgpt.core.state import State, get_last_state
 from tutorgpt.utils.config import settings
 
 MONGODB_URI = settings.MONGODB_URI
@@ -22,18 +22,21 @@ roadmaps_collection = db["roadmaps"]
 llm = get_llm()
 
 @tool
-def summarize_collected_information(state: State) -> str:
+def summarize_collected_information() -> str:
     """
     Summarize the information collected throughout the learning roadmap generation process.
     This function extracts information from the conversation history (messages) rather than
     relying on the user_info object.
     
     Args:
-        state: The complete state object containing the conversation history
+        None (the function reads the latest graph state snapshot internally)
         
     Returns:
         A formatted string summarizing the collected information
     """
+
+    real_state = get_last_state()
+    state_source: Dict[str, Any] = real_state or {}
 
     summary_prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an expert at summarizing information from conversations.
@@ -53,13 +56,15 @@ def summarize_collected_information(state: State) -> str:
         ("user", "Please summarize the information collected from this conversation:\n\n{messages}")
     ])
     
-    messages = state.get("messages", [])
+    messages = state_source.get("messages", [])
     messages_text = "\n".join([f"{msg.type}: {msg.content}" for msg in messages])
     
     summary_response = safe_llm_invoke(llm, summary_prompt.format(messages=messages_text))
 
     summary = summary_response.content
-    state["chat_summary"] = summary
+
+    if real_state is not None:
+        real_state["chat_summary"] = summary
 
     return summary
 
@@ -121,22 +126,28 @@ def extract_objectives_and_tasks(lines: List[str]) -> List[Dict[str, Any]]:
     return objectives
 
 @tool
-def generate_roadmap(subject: str, state: State) -> Dict[str, Any]:
+def generate_roadmap(subject: str) -> Dict[str, Any]:
     """
     Generate a learning roadmap based on the user's information and preferences using an LLM.
     
     Args:
         subject: The main subject or learning goal
-        state: The complete state object containing the conversation history
-        
+
     Returns:
         A dictionary containing the generated roadmap
     """
 
     created_at = datetime.now(timezone.utc).isoformat()
+    updated_at = created_at  
 
-    user_email = state.get("user_info", {}).get("user_id", "unknown_user")
-    summary = state.get("chat_summary", "")
+    real_state = get_last_state()
+    state_source: Dict[str, Any] = real_state or {}
+
+    user_info = state_source.get("user_info", {})
+    
+    user_id = user_info.get("user_id", "unknown_user")
+    username = user_info.get("username", "unknown_username")
+    summary = state_source.get("chat_summary", "")
     
     default_roadmap = {
         "title": f"{subject} learning path",
@@ -189,17 +200,16 @@ def generate_roadmap(subject: str, state: State) -> Dict[str, Any]:
         formatted_prompt = roadmap_prompt.format()
         roadmap_response = safe_llm_invoke(llm, formatted_prompt)
         roadmap_content = roadmap_response.content
-        
-        print(f"LLM Response: {roadmap_content}")
-        
+
         roadmap = parse_structured_text_to_json(roadmap_content, default_roadmap)
         
-    except Exception as e:
-        print(f"Error in generate_roadmap: {e}")
+    except Exception:
         roadmap = default_roadmap
     
-    roadmap["user_id"] = user_email
+    roadmap["user_id"] = user_id
+    roadmap["username"] = username
     roadmap["created_at"] = created_at
+    roadmap["updated_at"] = updated_at
     
     return roadmap
 
@@ -229,34 +239,38 @@ def parse_structured_text_to_json(text: str, default_roadmap: Dict[str, Any]) ->
 
         return roadmap
         
-    except Exception as e:
-        print(f"Error parsing structured text: {e}")
+    except Exception:
         return default_roadmap
 
 
 @tool
-def add_resources_and_save_roadmap(roadmap: dict, subject: str, state: State) -> str:
+def create_complete_roadmap(subject: str) -> str:
     """
-    Add resources to the roadmap and then save it to the database.
+    Generate a complete learning roadmap with resources and save it to the database.
+    This function performs the entire roadmap creation process sequentially:
+    1. Generate the roadmap structure
+    2. Add relevant resources to each task
+    3. Save the complete roadmap to the database
     
     Args:
-        roadmap: The roadmap dictionary
         subject: The main subject or learning goal
-        state: The complete state object containing the conversation history
-        
+
     Returns:
         A confirmation message with the roadmap ID
     """
     try:
-        if not isinstance(roadmap, dict) or not roadmap:
-            return "Error: Invalid or empty roadmap. Cannot add resources or save to database."
+        real_state = get_last_state()
+
+        roadmap = generate_roadmap.invoke({"subject": subject})
         
-        updated_roadmap = add_resources_to_roadmap(roadmap, subject, state)
+        updated_roadmap = add_resources_to_roadmap(roadmap, subject, real_state or {})
         
-        return save_roadmap_to_database(updated_roadmap)
+        result = save_roadmap_to_database(updated_roadmap)
+
+        return result
+        
     except Exception as e:
-        print(f"Error in add_resources_and_save_roadmap: {e}")
-        return f"Error processing roadmap: {str(e)}"
+        return f"Error creating roadmap: {str(e)}"
 
 
 def parse_ranked_resources(resources: List[Resource]) -> List[Dict[str, str]]:
@@ -285,11 +299,9 @@ def add_resources_to_roadmap(roadmap: Dict[str, Any], subject: str, state: State
         The updated roadmap with resources added
     """
     if "objectives" not in roadmap:
-        print("Error: roadmap does not have objectives")
         roadmap["objectives"] = []
     
     summary = state.get("chat_summary", "")
-    print(f"[add_resources_to_roadmap] Summary extracted from state:\n{summary}\n")
     
     resource_preference = "web"
     
@@ -304,8 +316,8 @@ def add_resources_to_roadmap(roadmap: Dict[str, Any], subject: str, state: State
                 resource_preference = "books"
             elif "interactive" in resource_section.lower() or "tutorials" in resource_section.lower():
                 resource_preference = "interactive"
-        except Exception as e:
-            print(f"Error parsing resource preferences: {e}")
+        except Exception:
+            pass
     
     for objective in roadmap["objectives"]:
         if not isinstance(objective, dict):
@@ -331,8 +343,7 @@ def add_resources_to_roadmap(roadmap: Dict[str, Any], subject: str, state: State
                 search_output: SearchOutput = resource_ranker.invoke({"input_data": ranker_input.model_dump()})
                 
                 task["resources"] = parse_ranked_resources(search_output.resources)
-            except Exception as e:
-                print(f"Error adding resources to task: {e}")
+            except Exception:
                 task["resources"] = []
     
     return roadmap

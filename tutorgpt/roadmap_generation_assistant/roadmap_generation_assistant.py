@@ -4,18 +4,15 @@ from tutorgpt.core.llm_config import get_llm
 from tutorgpt.core.assistant import CompleteOrEscalate
 from tutorgpt.roadmap_generation_assistant.tools import (
     summarize_collected_information,
-    generate_roadmap,
-    add_resources_and_save_roadmap
+    create_complete_roadmap
 )
 from tutorgpt.roadmap_generation_assistant.prompts import roadmap_generation_prompt
-from tutorgpt.tools.search_tools import resource_ranker
 
 llm = get_llm()
 
 roadmap_generation_tools = [
     summarize_collected_information,
-    generate_roadmap,
-    add_resources_and_save_roadmap
+    create_complete_roadmap
 ]
 
 roadmap_generation_runnable = roadmap_generation_prompt | llm.bind_tools(

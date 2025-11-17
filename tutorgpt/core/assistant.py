@@ -1,5 +1,5 @@
 from langchain_core.runnables import Runnable, RunnableConfig
-from tutorgpt.core.state import State
+from tutorgpt.core.state import State, set_last_state
 from pydantic import BaseModel
 
 class Assistant:
@@ -7,6 +7,10 @@ class Assistant:
         self.runnable = runnable
 
     def __call__(self, state: State, config: RunnableConfig):
+        # Store the latest graph state so that tools can access
+        # the real user_info instead of LLM-generated tool arguments.
+        set_last_state(state)
+
         while True:
             result = self.runnable.invoke(state)
             # If the LLM happens to return an empty response, we will re-prompt it
