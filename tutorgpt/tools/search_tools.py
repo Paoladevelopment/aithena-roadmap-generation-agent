@@ -43,15 +43,19 @@ def search_learning_resources(input_data: SearchInput) -> SearchOutput:
 def resource_ranker(input_data: RankerInput) -> SearchOutput:
     """
     Returns top 5 learning resources based on the user's topic and resource preferences.
+    The `learning_topic` field is used directly as the Tavily query string so that
+    callers can control the exact search phrase (in Spanish or English).
     """
-    query = f"top {input_data.resource_preference} resources to learn about {input_data.learning_topic}"
+    query = input_data.learning_topic
 
     print(f"[resource_ranker] Tavily Search query: '{query}'")
 
-    results = search_learning_resources(SearchInput(
-        query=query,
-        search_depth="basic"
-    ))
+    results = search_learning_resources(
+        SearchInput(
+            query=query,
+            search_depth="basic",
+        )
+    )
 
     return SearchOutput(
         summary_answer=results.summary_answer,
